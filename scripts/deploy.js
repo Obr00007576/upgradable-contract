@@ -1,55 +1,90 @@
 // We require the Hardhat Runtime Environment explicitly here. This is optional
 // but useful for running the script in a standalone fashion through `node <script>`.
 //
-// You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
-// will compile your contracts, add the Hardhat Runtime Environment's members to the
-// global scope, and execute the script.
-const { ethers } = require("hardhat");
+// When running the script with `npx hardhat run <script>` you'll find the Hardhat
+// Runtime Environment's members available in the global scope.
 const hre = require("hardhat");
 
+const TransparentUpgradeableProxy = require('@openzeppelin/upgrades-core/artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json');
+const ProxyAdmin = require('@openzeppelin/upgrades-core/artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json');
 
-async function deployProxy(contractName){
-  const Contract = await ethers.getContractFactory(contractName);
-  const contract = await Contract.deploy();
-  console.log("Implementation contract deployed to:", contract.address);
+const {getInitializerData} = require("@openzeppelin/hardhat-upgrades/dist/utils");
 
-  const Proxy = await ethers.getContractFactory("Proxy");
-  const proxy = await Proxy.deploy();
-  await proxy.upgrade(contract.address);
-  console.log("Proxy contract deployed to:", proxy.address);
 
-  const proxyContract = await contract.attach(proxy.address);
-  return proxyContract;
+async function fetchOrDeployAdminProxy(proxyAdminAddress) {
+    //const address = proxyAdminAddress ? null : hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(proxyAdminAddress));
+    let address;
+    if (proxyAdminAddress===null){
+        address=null;
+    }
+    else{
+        address=hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(proxyAdminAddress));
+    }
+    // const address = null;
+    const proxyAdminFactory = await hethers.getContractFactory(ProxyAdmin.abi, ProxyAdmin.bytecode);
+    //const proxyAdmin = proxyAdminAddress ? (await proxyAdminFactory.attach(address)) : (await proxyAdminFactory.deploy());
+    let proxyAdmin;
+    if(proxyAdminAddress===null){
+        proxyAdmin=await proxyAdminFactory.deploy();
+    }
+    else{
+        proxyAdmin=await proxyAdminFactory.attach(address);
+    }
+    await proxyAdmin.deployed();
+
+    console.log("ProxyAdmin deployed to:", proxyAdmin.address);
+
+    return proxyAdmin
 }
 
-async function upgrade(proxyAdress, newContractName){
-  const Contract = await ethers.getContractFactory(newContractName);
-  const contract = await Contract.deploy();
-  console.log("Implementation contract deployed to:", contract.address);
+async function deployProxy(proxyAdmin, ImplFactory, args, opts) {
+    if (!Array.isArray(args)) {
+        opts = args;
+        args = [];
+    }
+    const impl = await ImplFactory.deploy()
+    await impl.deployed();
 
-  const Proxy = await ethers.getContractFactory("Proxy");
-  const proxy = await Proxy.attach(proxyAdress);
-
-  await proxy.upgrade(contract.address);
+    const ProxyFactory = await hethers.getContractFactory(TransparentUpgradeableProxy.abi, TransparentUpgradeableProxy.bytecode);
+    const data = getInitializerData(impl.interface, args, opts.initializer);
+    const proxy = await ProxyFactory.deploy(impl.address, proxyAdmin.address, data)
+    await proxy.deployed();
+    return await ImplFactory.attach(proxy.address)
 }
+
+async function upgradeProxy(proxyAdmin, proxyAddress, ImplFactory) {
+    const impl = await ImplFactory.deploy()
+    await impl.deployed();
+    await proxyAdmin.upgrade(proxyAddress, impl.address);
+    return await ImplFactory.attach(proxyAddress)
+}
+
+async function upgradeProxyAddress(proxyAdmin, proxyAddress, ImplFactory, implAddress) {
+    await proxyAdmin.upgrade(proxyAddress, hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(implAddress)));
+    return await ImplFactory.attach(proxyAddress)
+}
+
 
 async function main() {
-  counterProxy = await deployProxy("Counter");
-  console.log("counter:", (await counterProxy.getCount()).toString());
-  await counterProxy.add();
-  console.log("counter:", (await counterProxy.getCount()).toString());
 
-  await upgrade(counterProxy.address, "CounterV2");
+    const Counter = await hethers.getContractFactory("Counter");
 
-  console.log("counter:", (await counterProxy.getCount()).toString());
-  await counterProxy.add();
-  console.log("counter:", (await counterProxy.getCount()).toString());
+    //const proxyAdmin = await fetchOrDeployAdminProxy(null);
+    const proxyAdmin = await fetchOrDeployAdminProxy(null);
+
+    const contractProxy = await deployProxy(proxyAdmin, Counter, [20], { initializer: 'initialize' });
+    // const contractProxy = await boxFactory.attach('0.0.1034');
+    await contractProxy.deployed();
+    console.log("Proxy deployed to:", contractProxy.address);
+
 
 }
 
 // We recommend this pattern to be able to use async/await everywhere
 // and properly handle errors.
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+        console.error(error);
+        process.exit(1);
+    });
