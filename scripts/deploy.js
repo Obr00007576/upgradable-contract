@@ -12,24 +12,10 @@ const {getInitializerData} = require("@openzeppelin/hardhat-upgrades/dist/utils"
 
 
 async function fetchOrDeployAdminProxy(proxyAdminAddress) {
-    //const address = proxyAdminAddress ? null : hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(proxyAdminAddress));
-    let address;
-    if (proxyAdminAddress===null){
-        address=null;
-    }
-    else{
-        address=hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(proxyAdminAddress));
-    }
+    const address = proxyAdminAddress ? hethers.utils.getAddressFromAccount(hethers.utils.parseAccount(proxyAdminAddress)) : null;
     // const address = null;
     const proxyAdminFactory = await hethers.getContractFactory(ProxyAdmin.abi, ProxyAdmin.bytecode);
-    //const proxyAdmin = proxyAdminAddress ? (await proxyAdminFactory.attach(address)) : (await proxyAdminFactory.deploy());
-    let proxyAdmin;
-    if(proxyAdminAddress===null){
-        proxyAdmin=await proxyAdminFactory.deploy();
-    }
-    else{
-        proxyAdmin=await proxyAdminFactory.attach(address);
-    }
+    const proxyAdmin = proxyAdminAddress ? (await proxyAdminFactory.attach(address)) : (await proxyAdminFactory.deploy());
     await proxyAdmin.deployed();
 
     console.log("ProxyAdmin deployed to:", proxyAdmin.address);
@@ -70,7 +56,7 @@ async function main() {
     const Counter = await hethers.getContractFactory("Counter");
 
     //const proxyAdmin = await fetchOrDeployAdminProxy(null);
-    const proxyAdmin = await fetchOrDeployAdminProxy(null);
+    const proxyAdmin = await fetchOrDeployAdminProxy();
 
     const contractProxy = await deployProxy(proxyAdmin, Counter, [20], { initializer: 'initialize' });
     // const contractProxy = await boxFactory.attach('0.0.1034');
